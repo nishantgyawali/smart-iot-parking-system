@@ -12,8 +12,8 @@
 // ─────────────────────────────────────────────
 //  WiFi credentials
 // ─────────────────────────────────────────────
-char ssid[] = "relianthome_2";
-char pass[] = "CLB4378B17";
+char ssid[] = "relianthome_2"; // replace your wifi ssid (only 2.4Ghz)
+char pass[] = "CLB4378B17"; // repalce your wifi password 
 
 // ─────────────────────────────────────────────
 //  Google Apps Script URL
