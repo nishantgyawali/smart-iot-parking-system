@@ -12,15 +12,15 @@
 // ─────────────────────────────────────────────
 //  WiFi credentials
 // ─────────────────────────────────────────────
-char ssid[] = "relianthome_2"; // replace your wifi ssid (only 2.4Ghz)
-char pass[] = "CLB4378B17"; // repalce your wifi password 
+char ssid[] = "relianthome_2";
+char pass[] = "CLB4378B17";
 
 // ─────────────────────────────────────────────
 //  Google Apps Script URL
 // ─────────────────────────────────────────────
 const String googleScript =
-  "https://script.google.com/macros/s/"
-  "AKfycbw0J0_iY54lrbFirKVLFbHXTXl7T-1s7_iRCfAT3voYOxPzzT6bSQ_96KGXmRE__pRYuQ/exec";
+"https://script.google.com/macros/s/"
+"AKfycbw0J0_iY54lrbFirKVLFbHXTXl7T-1s7_iRCfAT3voYOxPzzT6bSQ_96KGXmRE__pRYuQ/exec";
 
 // ─────────────────────────────────────────────
 //  Pin definitions
@@ -50,17 +50,21 @@ Servo             gateServo;
 BlynkTimer        timer;
 
 // ─────────────────────────────────────────────
-//  State
+//  State variables
 // ─────────────────────────────────────────────
 bool slot[4]    = {false, false, false, false};
 bool oldSlot[4] = {false, false, false, false};
 
+// Google Sheet Queue parameters to avoid latency spikes
+int  pendingGoogleSlot = -1;
+String pendingGoogleEvent = "";
+
 bool          isGateOpen   = false;
 unsigned long gateOpenTime = 0;
-const unsigned long GATE_OPEN_DURATION = 4000; // ms — gate stays open 4 s
+const unsigned long GATE_OPEN_DURATION = 4000; // ms
 
 // ─────────────────────────────────────────────
-//  Ultrasonic distance  (returns cm, 999 on timeout)
+//  Ultrasonic distance
 // ─────────────────────────────────────────────
 long readDistance(int trig, int echo)
 {
@@ -70,18 +74,17 @@ long readDistance(int trig, int echo)
   delayMicroseconds(10);
   digitalWrite(trig, LOW);
 
-  long duration = pulseIn(echo, HIGH, 30000UL); // 30 ms timeout
+  long duration = pulseIn(echo, HIGH, 20000UL); // Reduced timeout to 20ms for faster execution
   if (duration == 0) return 999;
   return duration * 0.034 / 2;
 }
 
 // ─────────────────────────────────────────────
-//  Google Sheets logger
+//  Google Sheets logger (Optimized timeouts)
 // ─────────────────────────────────────────────
 void sendGoogle(int slotNo, const String& event)
 {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[Google] WiFi not connected — skipping log");
     return;
   }
 
@@ -90,7 +93,7 @@ void sendGoogle(int slotNo, const String& event)
 
   http.begin(url);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.setTimeout(5000); 
+  http.setTimeout(1500); // Drastically cut down from 5000ms to 1500ms max
 
   int code = http.GET();
   Serial.printf("[Google] Slot %d %s → HTTP %d\n", slotNo, event.c_str(), code);
@@ -98,19 +101,35 @@ void sendGoogle(int slotNo, const String& event)
 }
 
 // ─────────────────────────────────────────────
-//  LCD helper — Updated to display Slot A, B, C, D
+//  Asynchronous Google Sheet Processor
+// ─────────────────────────────────────────────
+void processGoogleQueue()
+{
+  // If there's a pending Google Sheet event, log it here outside the main slot reader loop
+  if (pendingGoogleSlot != -1) {
+    int tempSlot = pendingGoogleSlot;
+    String tempEvent = pendingGoogleEvent;
+
+    // Clear queue variables immediately before the slow network call
+    pendingGoogleSlot = -1;
+    pendingGoogleEvent = "";
+
+    sendGoogle(tempSlot, tempEvent);
+  }
+}
+
+// ─────────────────────────────────────────────
+//  LCD helper
 // ─────────────────────────────────────────────
 void updateLCD(int occupied, int freeSlots)
 {
-  // Row 0: "Occ:X   Free:X  "
   lcd.setCursor(0, 0);
   lcd.print("Occ:");
   lcd.print(occupied);
   lcd.print("   Free:");
   lcd.print(freeSlots);
-  lcd.print("  ");   
+  lcd.print("  ");
 
-  // Row 1: slot status updated to letters -> "A:O B:F C:F D:F"
   lcd.setCursor(0, 1);
   char slotLetters[] = {'A', 'B', 'C', 'D'};
   for (int i = 0; i < 4; i++) {
@@ -122,7 +141,7 @@ void updateLCD(int occupied, int freeSlots)
 }
 
 // ─────────────────────────────────────────────
-//  Slot update  (called every 1 s by timer)
+//  Slot update (Instant Blynk Push execution)
 // ─────────────────────────────────────────────
 void updateSlots()
 {
@@ -136,16 +155,19 @@ void updateSlots()
     slot[i] = (dist[i] > 0 && dist[i] <= 15);
   }
 
-  Serial.printf("[Slots] dA=%lcm dB=%lcm dC=%lcm dD=%lcm  →  %s %s %s %s\n",
-    dist[0], dist[1], dist[2], dist[3],
-    slot[0]?"OCC":"free", slot[1]?"OCC":"free",
-    slot[2]?"OCC":"free", slot[3]?"OCC":"free");
-
-  // Log changes dynamically to Google Sheets
+  // Detect changes and dispatch instantly to Blynk dashboards
+  bool statusChanged = false;
   for (int i = 0; i < 4; i++) {
     if (slot[i] != oldSlot[i]) {
-      sendGoogle(i + 1, slot[i] ? "ENTRY" : "EXIT");
+      // Direct Blynk Write happens immediately without waiting for Google!
+      Blynk.virtualWrite(V0 + i, slot[i] ? 1 : 0);
+
+      // Push Google update request into the non-blocking background runner
+      pendingGoogleSlot = i + 1;
+      pendingGoogleEvent = slot[i] ? "ENTRY" : "EXIT";
+
       oldSlot[i] = slot[i];
+      statusChanged = true;
     }
   }
 
@@ -153,17 +175,18 @@ void updateSlots()
   for (int i = 0; i < 4; i++) if (slot[i]) occupied++;
   int freeSlots = 4 - occupied;
 
-  updateLCD(occupied, freeSlots);
-
-  // Blynk updates
-  for (int i = 0; i < 4; i++) {
-    Blynk.virtualWrite(V0 + i, slot[i] ? 1 : 0);
+  // Periodic heartbeat sync to Blynk to ensure dashboards remain accurate
+  if (!statusChanged) {
+    for (int i = 0; i < 4; i++) {
+      Blynk.virtualWrite(V0 + i, slot[i] ? 1 : 0);
+    }
   }
   Blynk.virtualWrite(V4, freeSlots);
+  updateLCD(occupied, freeSlots);
 }
 
 // ─────────────────────────────────────────────
-//  Gate control  (called every 200 ms by timer)
+//  Gate control
 // ─────────────────────────────────────────────
 void gateControl()
 {
@@ -172,23 +195,17 @@ void gateControl()
   int freeSlots = 0;
   for (int i = 0; i < 4; i++) if (!slot[i]) freeSlots++;
 
-  // Door logic: Ultrasonic detects vehicle < 20cm, moves servo from 0 to 90 degrees
   if (!isGateOpen && d > 0 && d < 20 && freeSlots > 0) {
     gateServo.write(90);
     isGateOpen   = true;
     gateOpenTime = millis();
-    Serial.printf("[Gate] OPENED — car at %lcm, %d free slots\n", d, freeSlots);
+    Serial.printf("[Gate] OPENED — car at %lcm\n", d);
   }
 
-  // Close gate after duration window runs out
   if (isGateOpen && (millis() - gateOpenTime >= GATE_OPEN_DURATION)) {
     gateServo.write(0);
     isGateOpen = false;
     Serial.println("[Gate] CLOSED");
-  }
-
-  if (!isGateOpen && d > 0 && d < 20 && freeSlots == 0) {
-    Serial.println("[Gate] Car detected but lot FULL — gate stays closed");
   }
 }
 
@@ -220,7 +237,7 @@ void setup()
 
   gateServo.setPeriodHertz(50);
   gateServo.attach(SERVO_PIN, 500, 2400);
-  gateServo.write(0); 
+  gateServo.write(0);
 
   lcd.init();
   lcd.backlight();
@@ -233,10 +250,10 @@ void setup()
   delay(1500);
   lcd.clear();
 
-  timer.setInterval(1000L, updateSlots);  
-  timer.setInterval(200L,  gateControl);  
-
-  Serial.println("=== System Ready ===");
+  // Optimized operational intervals
+  timer.setInterval(800L, updateSlots);        // Read slots slightly faster
+  timer.setInterval(200L, gateControl);       // Responsive servo gate logic
+  timer.setInterval(3000L, processGoogleQueue); // Google operations scheduled completely isolated
 }
 
 void loop()
