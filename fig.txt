@@ -1,0 +1,41 @@
++--------------------------------------------------------+
+       |             5V BATTERY BREADBOARD RAILS                |
+       |  (+) 5V Rail ----------------------------------------  | ---> (To ESP32 VIN, LCD VCC, Servo VCC, all 5x Sensor VCCs)
+       |  (-) GND Rail ---------------------------------------  | ---> (To ESP32 GND, LCD GND, Servo GND, all 5x Sensor GNDs)
+       +--------------------------------------------------------+
+                                   |
+              +--------------------+--------------------+
+              |                                         |
+    +-------------------+                     +-----------------------+
+    |    ESP32 BOARD    |                     |      LCD DISPLAY      |
+    +-------------------+                     +-----------------------+
+    | VIN           GND |                     | VCC  GND   SDA   SCL  |
+    |  |             |  |                     |  |    |     |     |   |
+    +--|-------------|--+                     +--|----|-----|-----|---+
+       |             |                           |    |     |     |
+ (To 5V Rail)  (To GND Rail)               (To 5V) (GND)    |     |
+                                                            |     |
+    +-------------------------------------------------------+     |
+    |  +----------------------------------------------------------+
+    |  |
+    |  |    +-------------------+
+    |  +--->| GPIO 22 (SCL)     |
+    +------>| GPIO 21 (SDA)     |
+            |                   |
+            | GPIO 18 (PWM) ----|---> [Servo Motor Signal Wire]
+            |                   |
+            | GPIO 13 (Trig) ---|---> [Gate Ultrasonic - TRIG]
+            | GPIO 12 (Echo) ---|---> [Gate Ultrasonic - ECHO]
+            |                   |
+            | GPIO 14 (Trig) ---|---> [Slot 1 Ultrasonic - TRIG]
+            | GPIO 27 (Echo) ---|---> [Slot 1 Ultrasonic - ECHO]
+            |                   |
+            | GPIO 25 (Trig) ---|---> [Slot 2 Ultrasonic - TRIG]
+            | GPIO 26 (Echo) ---|---> [Slot 2 Ultrasonic - ECHO]
+            |                   |
+            | GPIO 33 (Trig) ---|---> [Slot 3 Ultrasonic - TRIG]
+            | GPIO 32 (Echo) ---|---> [Slot 3 Ultrasonic - ECHO]
+            |                   |
+            | GPIO 17 (Trig) ---|---> [Slot 4 Ultrasonic - TRIG]
+            | GPIO 16 (Echo) ---|---> [Slot 4 Ultrasonic - ECHO]
+            +-------------------+
